@@ -64,7 +64,9 @@ esp_err_t uart_json_send_sensor_status(const char *status, int sensor_count)
 
 void uart_json_task(void *pvParameters)
 {
-    uint8_t data[UART_BUF_SIZE];
+    // UART_BUF_SIZE + 1 so that writing the null terminator at data[len]
+    // (where len can equal UART_BUF_SIZE) is always in bounds.
+    uint8_t data[UART_BUF_SIZE + 1];
     
     ESP_LOGI(TAG, "UART communication task started");
     

@@ -6,6 +6,10 @@
 #include "esp_vfs_dev.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "config_manager.h"
+#include "zigbee_coordinator.h"
+#include "sensor_manager.h"
+#include "uart_json.h"
 
 static const char *TAG = "MAIN";
 
@@ -21,9 +25,6 @@ void console_task(void *pvParameters)
     printf("╚════════════════════════════════════════════════════════════╝\n\n");
     fflush(stdout);
     
-    printf("[DEBUG] Console task started\n");
-    fflush(stdout);
-    
     while (1) {
         printf("sensorhub> ");
         fflush(stdout);
@@ -31,21 +32,13 @@ void console_task(void *pvParameters)
         memset(input_buffer, 0, sizeof(input_buffer));
         input_idx = 0;
         
-        printf("[DEBUG] Waiting for input...\n");
-        fflush(stdout);
-        
-        // Read one line
+        // Read one line; skip EOF characters while waiting for real input
         while (input_idx < 255) {
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(10));
             
             c = getchar();
             
-            printf("[DEBUG] Got: %d\n", c);
-            fflush(stdout);
-            
             if (c == EOF) {
-                printf("[DEBUG] EOF\n");
-                fflush(stdout);
                 continue;
             }
             
@@ -72,9 +65,6 @@ void console_task(void *pvParameters)
         for (int i = 0; i < input_idx; i++) {
             input_buffer[i] = tolower((unsigned char)input_buffer[i]);
         }
-        
-        printf("\n[DEBUG] Command: %s\n", input_buffer);
-        fflush(stdout);
         
         // Process commands
         if (strcmp(input_buffer, "help") == 0) {
@@ -114,15 +104,32 @@ void app_main(void)
     printf("║  ESP32-C6 Apartment Occupancy System                        ║\n");
     printf("╚════════════════════════════════════════════════════════════╝\n\n");
     fflush(stdout);
-    
-    // Initialize VFS for console I/O
+
+    // Install the UART driver for the console port before hooking it into
+    // the VFS layer.  Without this, esp_vfs_dev_uart_use_driver() has no
+    // underlying driver to forward reads/writes to, so getchar() returns
+    // EOF immediately on every call.
+    ESP_ERROR_CHECK(uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM,
+                                        256,   // RX ring-buffer
+                                        0,     // TX ring-buffer (0 = blocking writes)
+                                        0, NULL, 0));
+
+    // Configure VFS for console I/O
     esp_vfs_dev_uart_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
     esp_vfs_dev_uart_port_set_rx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM, ESP_LINE_ENDINGS_CR);
     esp_vfs_dev_uart_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM, ESP_LINE_ENDINGS_CRLF);
-    
-    printf("[DEBUG] VFS console initialized\n");
-    fflush(stdout);
-    
+
+    // Disable stdin buffering so getchar() returns each byte immediately
+    setvbuf(stdin, NULL, _IONBF, 0);
+
+    ESP_LOGI(TAG, "Console UART driver and VFS initialized");
+
+    // Initialize subsystems
+    ESP_ERROR_CHECK(config_manager_init());
+    ESP_ERROR_CHECK(zigbee_coordinator_init());
+    ESP_ERROR_CHECK(sensor_manager_init());
+    ESP_ERROR_CHECK(uart_json_init());
+
     xTaskCreate(console_task, "console", 4096, NULL, 5, NULL);
     
     while(1) {
