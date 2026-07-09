@@ -10,8 +10,8 @@
 static const char *TAG = "UART_JSON";
 
 #define UART_NUM UART_NUM_1
-#define UART_TX_GPIO 16
-#define UART_RX_GPIO 17
+#define UART_TX_GPIO 10
+#define UART_RX_GPIO 9
 #define UART_BAUD_RATE 115200
 #define UART_BUF_SIZE 1024
 
@@ -22,6 +22,26 @@ static char* get_iso8601_timestamp(void)
     struct tm *timeinfo = gmtime(&now);
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
     return timestamp;
+}
+
+void uart_json_task(void *pvParameters)
+{
+    // UART_BUF_SIZE + 1 so that writing the null terminator at data[len]
+    // (where len can equal UART_BUF_SIZE) is always in bounds.
+    uint8_t data[UART_BUF_SIZE + 1];
+    
+    ESP_LOGI(TAG, "UART communication task started");
+    
+    while (1) {
+        int len = uart_read_bytes(UART_NUM, data, UART_BUF_SIZE, 100 / portTICK_PERIOD_MS);
+        
+        if (len > 0) {
+            data[len] = '\0';
+            ESP_LOGI(TAG, "Received from Master: %s", data);
+        }
+        
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
 }
 
 esp_err_t uart_json_init(void)
@@ -43,7 +63,11 @@ esp_err_t uart_json_init(void)
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM, UART_TX_GPIO, UART_RX_GPIO, 
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     
-    ESP_LOGI(TAG, "UART configured: GPIO16(TX) → Master GPIO17, GPIO17(RX) ← Master GPIO16");
+    ESP_LOGI(TAG, "UART configured: GPIO10(TX) → Master, GPIO9(RX) ← Master");
+    
+    // Create the UART JSON task with adequate stack size (4096 bytes)
+    xTaskCreate(uart_json_task, "uart_json", 4096, NULL, 10, NULL);
+    
     return ESP_OK;
 }
 
@@ -60,24 +84,4 @@ esp_err_t uart_json_send_sensor_status(const char *status, int sensor_count)
     ESP_LOGI(TAG, "Sent: %s", json_msg);
     
     return ESP_OK;
-}
-
-void uart_json_task(void *pvParameters)
-{
-    // UART_BUF_SIZE + 1 so that writing the null terminator at data[len]
-    // (where len can equal UART_BUF_SIZE) is always in bounds.
-    uint8_t data[UART_BUF_SIZE + 1];
-    
-    ESP_LOGI(TAG, "UART communication task started");
-    
-    while (1) {
-        int len = uart_read_bytes(UART_NUM, data, UART_BUF_SIZE, 100 / portTICK_PERIOD_MS);
-        
-        if (len > 0) {
-            data[len] = '\0';
-            ESP_LOGI(TAG, "Received from Master: %s", data);
-        }
-        
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
 }
