@@ -8,4 +8,5 @@ idf_component_register(SRCS "main.c"
                        REQUIRES freertos
                                nvs_flash
                                spiffs
-                               esp_driver_uart)
+                               esp_driver_uart
+                               vfs)
